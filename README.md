@@ -30,9 +30,9 @@ Script pour automatiser le déploiement sur les environnements de préproduction
     > - Effectue les étapes de déploiement : compression du projet, transfert du fichier zip, déploiement sur le serveur de production.
 
 > Note : N'oubliez pas de reseigner dans gitlab les variable de connexion SSH:
-        - $SSH_PRIVATE_KEY_PROD
-        - $SSH_PRIVATE_KEY_PRE_PROD
-        - $SSH_USER_PROD
-        - $SSH_USER_PRE_PROD
-        - $SSH_HOST
-        - $SSH_PORT
+  > - $SSH_PRIVATE_KEY_PROD
+  > - $SSH_PRIVATE_KEY_PRE_PROD
+  > - $SSH_USER_PROD
+  > - $SSH_USER_PRE_PROD
+  > - $SSH_HOST
+  > - $SSH_PORT
