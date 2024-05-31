@@ -13,7 +13,7 @@ Script pour automatiser le déploiement sur les environnements de préproduction
     > - Stage : deploy
     > - Conditions : S'exécute uniquement si la branche est main.
     > - Environnement : preproduction
-  > -Scripts :
+  > - Scripts :
     > - Met à jour les packages et installe openssh-client, zip, et unzip.
     > - Initialise SSH avec la clé appropriée.
     > - Vérifie si le dossier vendor existe, et exécute composer install ou composer update en conséquence.
@@ -23,16 +23,16 @@ Script pour automatiser le déploiement sur les environnements de préproduction
     > - Stage : deploy
     > - Conditions : S'exécute uniquement si la branche est Production.
     > - Environnement : production
-  > -Scripts :
+  > - Scripts :
     > - Met à jour les packages et installe openssh-client, zip, et unzip.
     > - Initialise SSH avec la clé appropriée.
     > - Vérifie si le dossier vendor existe, et exécute composer install ou composer update en conséquence.
     > - Effectue les étapes de déploiement : compression du projet, transfert du fichier zip, déploiement sur le serveur de production.
 
 > Note : N'oubliez pas de reseigner dans gitlab les variable de connexion SSH:
-        > - $SSH_PRIVATE_KEY_PROD
-        > - $SSH_PRIVATE_KEY_PRE_PROD
-        > - $SSH_USER_PROD
-        > - $SSH_USER_PRE_PROD
-        > - $SSH_HOST
-        > - $SSH_PORT
+        - $SSH_PRIVATE_KEY_PROD
+        - $SSH_PRIVATE_KEY_PRE_PROD
+        - $SSH_USER_PROD
+        - $SSH_USER_PRE_PROD
+        - $SSH_HOST
+        - $SSH_PORT
