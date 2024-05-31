@@ -1,0 +1,128 @@
+image: jakzal/phpqa:php8.1
+
+variables:
+    PROJECT_DIR_PRE_PROD: "public_html/example-pre-prod.com"
+    PROJECT_DIR_PROD: "public_html/example-prod.com"
+    DEPLOYMENT_DATE: "$(date '+%d%m%Y')"
+    DEPLOYMENT_NUMBER: $CI_PIPELINE_ID
+    DEPLOYMENT_PATH: "releases"
+    BACKUP_PATH: "backup"
+    CURRENT_DIR: "current"
+    SHARED_PATH: "shared"
+    ENV_URL_PROD: "https://example-pre-prod.com"
+    ENV_URL_PRE_PROD: "https:example-prod.com"
+    php81: "/opt/cpanel/ea-php81/root/usr/bin/php"
+
+.init_ssh: &init_ssh |
+  apt-get update -y --allow-releaseinfo-change && apt-get install -y openssh-client zip unzip
+  eval $(ssh-agent -s)
+  if [ "$CI_ENVIRONMENT_NAME" == "preproduction" ]; then
+    echo "$SSH_PRIVATE_KEY_PRE_PROD" | tr -d '\r' | ssh-add -
+  else
+    echo "$SSH_PRIVATE_KEY_PROD" | tr -d '\r' | ssh-add -
+  fi
+  mkdir -p ~/.ssh && chmod 700 ~/.ssh
+  [[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" >> ~/.ssh/config
+
+stages:
+    - build
+    - deploy
+
+pre-production:
+    stage: deploy
+    rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    environment:
+        name: preproduction
+        url: $ENV_URL_PRE_PROD
+    before_script:
+        - *init_ssh
+    script:
+        - echo "Début du déploiement de pré-production"
+        # Créez le nom du répertoire de déploiement en ajoutant la date et le numéro de déploiement
+        - RELEASE_DIR="$DEPLOYMENT_DATE-$DEPLOYMENT_NUMBER"
+        # Compression du projet en .zip
+        - zip -r $CI_COMMIT_SHA.zip .
+        # Transfert du fichier zip
+        - scp -P $SSH_PORT $CI_COMMIT_SHA.zip $SSH_USER_PRE_PROD@$SSH_HOST:$PROJECT_DIR_PRE_PROD/$DEPLOYMENT_PATH
+        - |
+            ssh -p $SSH_PORT $SSH_USER_PRE_PROD@$SSH_HOST "
+            cd $PROJECT_DIR_PRE_PROD
+            cd $CURRENT_DIR && $php81 artisan down && cd ..
+            if [[ ! -d $DEPLOYMENT_PATH/$RELEASE_DIR ]]; then mkdir -p $DEPLOYMENT_PATH/$RELEASE_DIR; fi
+            if [[ ! -d $BACKUP_PATH ]]; then mkdir -p $BACKUP_PATH; fi
+            unzip -oq $DEPLOYMENT_PATH/$CI_COMMIT_SHA.zip -d $DEPLOYMENT_PATH/$RELEASE_DIR && rm $DEPLOYMENT_PATH/$CI_COMMIT_SHA.zip
+            rm -rf $CURRENT_DIR/storage
+            rm -rf $CURRENT_DIR/vendor
+            rm -rf $BACKUP_PATH/*
+            OLD_RELEASE_DIR=\$(readlink $CURRENT_DIR)
+            OLD_RELEASE_BASENAME=\$(basename \$OLD_RELEASE_DIR)
+            [ -d $OLD_RELEASE_DIR ] && mv -v \$OLD_RELEASE_DIR $BACKUP_PATH/\$OLD_RELEASE_BASENAME || true
+            [[ -L $CURRENT_DIR ]] && rm $CURRENT_DIR || true
+            rm -rf $DEPLOYMENT_PATH/$RELEASE_DIR/storage
+            ln -nfs ~/$PROJECT_DIR_PRE_PROD/$SHARED_PATH/.env $DEPLOYMENT_PATH/$RELEASE_DIR/
+            ln -nfs ~/$PROJECT_DIR_PRE_PROD/$SHARED_PATH/.htaccess $DEPLOYMENT_PATH/$RELEASE_DIR/public/
+            ln -nfs ~/$PROJECT_DIR_PRE_PROD/$SHARED_PATH/storage $DEPLOYMENT_PATH/$RELEASE_DIR/
+            ln -nfs $DEPLOYMENT_PATH/$RELEASE_DIR $CURRENT_DIR
+            cd $CURRENT_DIR 
+            if [[ ! -d vendor ]]; then composer install; else composer update; fi
+            $php81 artisan migrate
+            $php81 artisan storage:link
+            $php81 artisan op:clear
+            $php81 artisan up
+            echo "Déploiement de pré-production terminé"
+            exit
+            "
+        - exit
+    when: manual
+    allow_failure: true
+
+
+production:
+    stage: deploy
+    rules:
+    - if: $CI_COMMIT_BRANCH == "Pre-Production"
+    environment:
+        name: production
+        url: $ENV_URL_PROD
+    before_script:
+        - *init_ssh
+    script:
+        - echo "Début du déploiement de production"
+        # Créez le nom du répertoire de déploiement en ajoutant la date et le numéro de déploiement
+        - RELEASE_DIR="$DEPLOYMENT_DATE-$DEPLOYMENT_NUMBER"
+        # Compression du projet en .zip
+        - zip -r $CI_COMMIT_SHA.zip .
+        # Transfert du fichier zip
+        - scp -P $SSH_PORT $CI_COMMIT_SHA.zip $SSH_USER_PROD@$SSH_HOST:$PROJECT_DIR_PROD/$DEPLOYMENT_PATH
+        - |
+            ssh -p $SSH_PORT $SSH_USER_PROD@$SSH_HOST "
+            cd $PROJECT_DIR_PROD
+            cd $CURRENT_DIR && $php81 artisan down && cd ..
+            if [[ ! -d $DEPLOYMENT_PATH/$RELEASE_DIR ]]; then mkdir -p $DEPLOYMENT_PATH/$RELEASE_DIR; fi
+            if [[ ! -d $BACKUP_PATH ]]; then mkdir -p $BACKUP_PATH; fi
+            unzip -oq $DEPLOYMENT_PATH/$CI_COMMIT_SHA.zip -d $DEPLOYMENT_PATH/$RELEASE_DIR && rm $DEPLOYMENT_PATH/$CI_COMMIT_SHA.zip
+            rm -rf $CURRENT_DIR/storage
+            rm -rf $CURRENT_DIR/vendor
+            rm -rf $BACKUP_PATH/*
+            OLD_RELEASE_DIR=\$(readlink $CURRENT_DIR)
+            OLD_RELEASE_BASENAME=\$(basename \$OLD_RELEASE_DIR)
+            [ -d $OLD_RELEASE_DIR ] && mv -v \$OLD_RELEASE_DIR $BACKUP_PATH/\$OLD_RELEASE_BASENAME || true
+            [[ -L $CURRENT_DIR ]] && rm $CURRENT_DIR || true
+            rm -rf $DEPLOYMENT_PATH/$RELEASE_DIR/storage
+            ln -nfs ~/$PROJECT_DIR_PROD/$SHARED_PATH/.env $DEPLOYMENT_PATH/$RELEASE_DIR/
+            ln -nfs ~/$PROJECT_DIR_PROD/$SHARED_PATH/.htaccess $DEPLOYMENT_PATH/$RELEASE_DIR/public/
+            ln -nfs ~/$PROJECT_DIR_PROD/$SHARED_PATH/storage $DEPLOYMENT_PATH/$RELEASE_DIR/
+            ln -nfs $DEPLOYMENT_PATH/$RELEASE_DIR $CURRENT_DIR
+            cd $CURRENT_DIR
+            if [[ ! -d vendor ]]; then composer install; else composer update; fi 
+            $php81 artisan migrate
+            $php81 artisan storage:link
+            $php81 artisan op:clear
+            $php81 artisan up
+            echo "Déploiement de production terminé"
+            exit
+            "
+        - exit
+    when: manual
+    allow_failure: true
