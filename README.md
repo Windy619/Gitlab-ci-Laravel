@@ -12,7 +12,7 @@ Script pour automatiser le déploiement sur les environnements de préproduction
   > - Pre-production :
   >   - Stage : deploy
   >     - Conditions : S'exécute uniquement si la branche est main.
-    >   - Environnement : preproduction
+  >     - Environnement : preproduction
   > - Scripts :
     >   - Met à jour les packages et installe openssh-client, zip, et unzip.
     >   - Initialise SSH avec la clé appropriée.
