@@ -10,7 +10,7 @@ Script pour automatiser le déploiement sur les environnements de préproduction
 
 > - Jobs :
   > - Pre-production :
-    >   - Stage : deploy
+  >   - Stage : deploy
     >   - Conditions : S'exécute uniquement si la branche est main.
     >   - Environnement : preproduction
   > - Scripts :
