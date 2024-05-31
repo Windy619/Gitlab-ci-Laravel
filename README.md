@@ -11,16 +11,16 @@ Script pour automatiser le déploiement sur les environnements de préproduction
 > - Jobs :
   > - Pre-production :
   >     - Stage : deploy
-  >     - Conditions : S'exécute uniquement si la branche est main.
-  >     - Environnement : preproduction
-  > - Scripts :
+    >     - Conditions : S'exécute uniquement si la branche est main.
+    >     - Environnement : preproduction
+  >     - Scripts :
   >     - Met à jour les packages et installe openssh-client, zip, et unzip.
   >     - Initialise SSH avec la clé appropriée.
   >     - Vérifie si le dossier vendor existe, et exécute composer install ou composer update en conséquence.
   >     - Effectue les étapes de déploiement : compression du projet, transfert du fichier zip, déploiement sur le serveur de préproduction.
 
   > - Production :
-    >   - Stage : deploy
+  >     - Stage : deploy
     >   - Conditions : S'exécute uniquement si la branche est Production.
     >   - Environnement : production
   > - Scripts :
