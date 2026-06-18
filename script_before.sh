@@ -1,7 +1,8 @@
 #!/bin/bash
 # init_server.sh — à lancer manuellement sur le serveur
 
-BASE="$HOME/public_html/dev.exemple.com"   # adapter par env
+DOMAIN=$1
+BASE="$HOME/public_html/$DOMAIN"   # adapter par env
 
 # 1. Arborescence principale
 mkdir -p "$BASE/releases"
