@@ -1,26 +1,47 @@
+# ==============================================================
+# .gitlab-ci.yml
+# Workflow : feature/* → develop → staging → main → production
+# Hotfix   : hotfix/* → main → (back-merge → staging → develop)
+# ==============================================================
+
 variables:
-  PROJECT_DIR_DEV: "public_html/dev.exemple.com"
-  PROJECT_DIR_PRE_PROD: "public_html/pre.exemple.com"
-  PROJECT_DIR_PROD: "public_html/"
+  # --- Répertoires projet par environnement ---
+  PROJECT_DIR_DEV:     "public_html/dev.mondomaine.com"
+  PROJECT_DIR_TEST:    "public_html/test.mondomaine.com"
+  PROJECT_DIR_DEMO:    "public_html/demo.mondomaine.com"
+  PROJECT_DIR_PREPROD: "public_html/preprod.mondomaine.com"
+  PROJECT_DIR_PROD:    "public_html/mondomaine.com"
+
+  # --- URLs publiques ---
+  ENV_URL_DEV:     "https://dev.mondomaine.com"
+  ENV_URL_TEST:    "https://test.mondomaine.com"
+  ENV_URL_DEMO:    "https://demo.mondomaine.com"
+  ENV_URL_PREPROD: "https://preprod.mondomaine.com"
+  ENV_URL_PROD:    "https://mondomaine.com"
+
+  # --- Déploiement ---
   DEPLOYMENT_NUMBER: $CI_PIPELINE_ID
-  DEPLOYMENT_PATH: "releases"
-  BACKUP_PATH: "backup"
-  CURRENT_DIR: "current"
-  SHARED_PATH: "shared"
-  ENV_URL_DEV: "https://dev.exemple.com"
-  ENV_URL_PRE_PROD: "https://pre.exemple.com"
-  ENV_URL_PROD: "https://exemple.com"
-  php82: "/opt/cpanel/ea-php82/root/usr/bin/php"
+  DEPLOYMENT_PATH:   "releases"
+  BACKUP_PATH:       "backup"
+  CURRENT_DIR:       "current"
+  SHARED_PATH:       "shared"
+
+  # --- Serveur ---
+  php83:    "/opt/cpanel/ea-php83/root/usr/bin/php"
   composer: "/opt/cpanel/composer/bin/composer"
   NODE_ENV: "production"
 
+# --------------------------------------------------------------
+# STAGES
+# --------------------------------------------------------------
 stages:
   - build
   - deploy
+  - rollback
 
-# --------------------------------------------------------------
+# ==============================================================
 # SSH INIT
-# --------------------------------------------------------------
+# ==============================================================
 .init_ssh: &init_ssh
   - apt-get update -y --allow-releaseinfo-change
   - apt-get install -y openssh-client zip unzip
@@ -33,11 +54,11 @@ stages:
         echo -e "Host *\n\tStrictHostKeyChecking no\n\n" >> ~/.ssh/config
       fi
 
-# --------------------------------------------------------------
+# ==============================================================
 # DEPLOY TEMPLATE
-# --------------------------------------------------------------
+# ==============================================================
 .deploy_template: &deploy_template
-  - echo "Début du déploiement sur $ENVIRONMENT"
+  - echo "Déploiement sur $ENVIRONMENT ($PROJECT_DIR)"
   - RELEASE_DIR="$(date '+%d%m%Y')-$DEPLOYMENT_NUMBER"
   - zip -r "$CI_COMMIT_SHA.zip" . -x "*.git*" "node_modules/*" ".env" "storage/logs/*" ".npm/*"
   - scp -P "$SSH_PORT" "$CI_COMMIT_SHA.zip" "$SSH_USER@$SSH_HOST:$PROJECT_DIR/$DEPLOYMENT_PATH"
@@ -46,57 +67,70 @@ stages:
         set -e
         cd $PROJECT_DIR
 
+        # Maintenance ON (si current existe)
         if [ -L $CURRENT_DIR ]; then
           cd $CURRENT_DIR
-          $php82 artisan down || true
+          $php83 artisan down || true
           cd ..
         fi
 
-        if [[ ! -d $DEPLOYMENT_PATH/$RELEASE_DIR ]]; then mkdir -p $DEPLOYMENT_PATH/$RELEASE_DIR; fi
-        if [[ ! -d $BACKUP_PATH ]]; then mkdir -p $BACKUP_PATH; fi
+        # Création des dossiers si absents
+        [ -d $DEPLOYMENT_PATH/$RELEASE_DIR ] || mkdir -p $DEPLOYMENT_PATH/$RELEASE_DIR
+        [ -d $BACKUP_PATH ]                  || mkdir -p $BACKUP_PATH
 
-        unzip -oq $DEPLOYMENT_PATH/$CI_COMMIT_SHA.zip -d $DEPLOYMENT_PATH/$RELEASE_DIR && rm $DEPLOYMENT_PATH/$CI_COMMIT_SHA.zip
+        # Extraction de l'archive
+        unzip -oq $DEPLOYMENT_PATH/$CI_COMMIT_SHA.zip -d $DEPLOYMENT_PATH/$RELEASE_DIR
+        rm $DEPLOYMENT_PATH/$CI_COMMIT_SHA.zip
 
-        rm -rf $CURRENT_DIR/vendor
-        rm -rf $CURRENT_DIR/node_modules
-        rm -rf $CURRENT_DIR/storage
-        rm -rf $CURRENT_DIR/.env
-
+        # Sauvegarde de la release précédente
         if [ -L $CURRENT_DIR ]; then
           OLD_RELEASE_DIR=\$(readlink -f $CURRENT_DIR)
           mv -f \$OLD_RELEASE_DIR $BACKUP_PATH/\$(basename \$OLD_RELEASE_DIR)-\$(date +%Y%m%d%H%M%S)
         fi
 
+        # Nettoyage : on garde seulement les 3 derniers backups
         ls -dt $BACKUP_PATH/* 2>/dev/null | tail -n +4 | xargs rm -rf || true
+
+        # Suppression du symlink current et du storage embarqué
         rm -f $CURRENT_DIR
         rm -rf $DEPLOYMENT_PATH/$RELEASE_DIR/storage
 
-        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/.env $DEPLOYMENT_PATH/$RELEASE_DIR/
-        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/.htaccess $DEPLOYMENT_PATH/$RELEASE_DIR/public/
-        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/php.ini $DEPLOYMENT_PATH/$RELEASE_DIR/public/
-        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/storage $DEPLOYMENT_PATH/$RELEASE_DIR/
+        # Symlinks vers les fichiers partagés (shared/)
+        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/.env        $DEPLOYMENT_PATH/$RELEASE_DIR/
+        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/.htaccess   $DEPLOYMENT_PATH/$RELEASE_DIR/public/
+        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/php.ini     $DEPLOYMENT_PATH/$RELEASE_DIR/public/
+        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/user.ini     $DEPLOYMENT_PATH/$RELEASE_DIR/public/
+        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/storage     $DEPLOYMENT_PATH/$RELEASE_DIR/
 
+        # Activation de la nouvelle release
         ln -nfs $DEPLOYMENT_PATH/$RELEASE_DIR $CURRENT_DIR
         cd $CURRENT_DIR
 
-        $php82 $composer install --no-dev --optimize-autoloader --no-interaction
+        # Dépendances PHP
+        $php83 $composer install --no-dev --optimize-autoloader --no-interaction
 
-        $php82 artisan optimize:clear
-        $php82 artisan storage:link
+        # Optimisations Laravel
+        $php83 artisan optimize:clear
+        $php83 artisan storage:link
 
+        # Migrations (variable optionnelle selon l'environnement)
         if [ -n \"$MIGRATE_CMD\" ]; then
-          $php82 artisan $MIGRATE_CMD
+          $php83 artisan $MIGRATE_CMD
         fi
 
-        sudo supervisorctl restart "laravel-worker-${ENVIRONMENT}:*" || true
-        $php82 artisan up
+        # Redémarrage du worker queue
+        sudo supervisorctl restart \"laravel-worker-${ENVIRONMENT}:*\" || true
+
+        # Maintenance OFF
+        $php83 artisan up
 
         echo \"Déploiement sur $ENVIRONMENT terminé avec succès\"
       "
 
-# --------------------------------------------------------------
-# BUILD ASSETS
-# --------------------------------------------------------------
+# ==============================================================
+# BUILD ASSETS (Node 22)
+# Déclenché sur toutes les branches de déploiement + les tags
+# ==============================================================
 build_assets:
   image: node:22
   stage: build
@@ -108,23 +142,27 @@ build_assets:
     paths:
       - public/build/
     expire_in: 1 hour
-  only:
-    - main
-    - Pre-Production
-    - Production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+    - if: '$CI_COMMIT_BRANCH == "staging"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+.*$/'   # tags v1.0.0, v1.2.3-rc1, etc.
 
-# --------------------------------------------------------------
-# DEPLOY DEV
-# --------------------------------------------------------------
-development:
-  image: jakzal/phpqa:php8.2
+# ==============================================================
+# DEV — branche : develop
+# Déploiement : automatique
+# DB          : migrate:fresh --seed (données fraîches à chaque push)
+# Domaines    : dev + test (même codebase, équipes différentes)
+# ==============================================================
+deploy_dev:
+  image: jakzal/phpqa:php8.4
   stage: deploy
   variables:
     PROJECT_DIR: $PROJECT_DIR_DEV
     ENVIRONMENT: "dev"
     MIGRATE_CMD: "migrate:fresh --seed"
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
   environment:
     name: development
     url: $ENV_URL_DEV
@@ -136,41 +174,92 @@ development:
     - build_assets
   when: always
 
-# --------------------------------------------------------------
-# DEPLOY PRE-PROD
-# --------------------------------------------------------------
-pre-production:
-  image: jakzal/phpqa:php8.2
+deploy_test:
+  image: jakzal/phpqa:php8.4
   stage: deploy
   variables:
-    PROJECT_DIR: $PROJECT_DIR_PRE_PROD
-    ENVIRONMENT: "pre-prod"
+    PROJECT_DIR: $PROJECT_DIR_TEST
+    ENVIRONMENT: "test"
     MIGRATE_CMD: "migrate"
   rules:
-    - if: '$CI_COMMIT_BRANCH == "Pre-Production"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
   environment:
-    name: preproduction
-    url: $ENV_URL_PRE_PROD
+    name: test
+    url: $ENV_URL_TEST
   before_script:
     - *init_ssh
   script:
     - *deploy_template
   dependencies:
     - build_assets
-  when: manual
+  when: always
 
-# --------------------------------------------------------------
-# DEPLOY PROD
-# --------------------------------------------------------------
-production:
-  image: jakzal/phpqa:php8.2
+# ==============================================================
+# DEMO — branche : staging
+# Déploiement : manuel (validation client / démo commerciale)
+# DB          : migrate uniquement (données de démo conservées)
+# ==============================================================
+deploy_demo:
+  image: jakzal/phpqa:php8.4
+  stage: deploy
+  variables:
+    PROJECT_DIR: $PROJECT_DIR_DEMO
+    ENVIRONMENT: "demo"
+    MIGRATE_CMD: "migrate"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "staging"'
+      when: manual
+  environment:
+    name: demo
+    url: $ENV_URL_DEMO
+  before_script:
+    - *init_ssh
+  script:
+    - *deploy_template
+  dependencies:
+    - build_assets
+
+# ==============================================================
+# PRE-PROD — branche : main
+# Déploiement : manuel (validation finale avant prod)
+# DB          : migrate uniquement
+# ==============================================================
+deploy_preprod:
+  image: jakzal/phpqa:php8.4
+  stage: deploy
+  variables:
+    PROJECT_DIR: $PROJECT_DIR_PREPROD
+    ENVIRONMENT: "pre-prod"
+    MIGRATE_CMD: "migrate"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+  environment:
+    name: preproduction
+    url: $ENV_URL_PREPROD
+  before_script:
+    - *init_ssh
+  script:
+    - *deploy_template
+  dependencies:
+    - build_assets
+
+# ==============================================================
+# PRODUCTION — tag : v* (ex: v1.1.0)
+# Déploiement : manuel (bouton GitLab après création du tag)
+# DB          : migrate uniquement
+# Jamais déclenché sur push de branche, uniquement sur tag
+# ==============================================================
+deploy_production:
+  image: jakzal/phpqa:php8.4
   stage: deploy
   variables:
     PROJECT_DIR: $PROJECT_DIR_PROD
     ENVIRONMENT: "prod"
     MIGRATE_CMD: "migrate"
   rules:
-    - if: '$CI_COMMIT_BRANCH == "Production"'
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+.*$/'
+      when: manual
   environment:
     name: production
     url: $ENV_URL_PROD
@@ -180,4 +269,173 @@ production:
     - *deploy_template
   dependencies:
     - build_assets
-  when: manual
+
+# ==============================================================
+# ROLLBACK TEMPLATE
+# Réactive le backup le plus récent dans backup/
+# Le backup devient la nouvelle current, sans retoucher shared/
+# ==============================================================
+.rollback_template: &rollback_template
+  - echo "Rollback sur $ENVIRONMENT ($PROJECT_DIR)"
+  - |
+      ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "
+        set -e
+        cd $PROJECT_DIR
+
+        # Vérifie qu'il existe au moins un backup
+        LAST_BACKUP=\$(ls -dt $BACKUP_PATH/* 2>/dev/null | head -n 1)
+        if [ -z \"\$LAST_BACKUP\" ]; then
+          echo 'Aucun backup disponible pour le rollback.'
+          exit 1
+        fi
+
+        echo \"Backup cible : \$LAST_BACKUP\"
+
+        # Maintenance ON
+        if [ -L $CURRENT_DIR ]; then
+          cd $CURRENT_DIR && $php83 artisan down || true && cd ..
+        fi
+
+        # Sauvegarde de la release actuelle avant rollback
+        if [ -L $CURRENT_DIR ]; then
+          CURRENT_RELEASE=\$(readlink -f $CURRENT_DIR)
+          mv -f \$CURRENT_RELEASE $BACKUP_PATH/\$(basename \$CURRENT_RELEASE)-rolled-back-\$(date +%Y%m%d%H%M%S) || true
+        fi
+
+        # Restauration du backup dans releases/
+        RESTORE_DIR=\"$DEPLOYMENT_PATH/rollback-\$(date '+%d%m%Y%H%M%S')\"
+        cp -a \$LAST_BACKUP \$RESTORE_DIR
+
+        # Suppression du backup utilisé
+        rm -rf \$LAST_BACKUP
+
+        # Recréation des symlinks shared/ sur la release restaurée
+        rm -f \$RESTORE_DIR/.env
+        rm -f \$RESTORE_DIR/public/.htaccess
+        rm -f \$RESTORE_DIR/public/php.ini
+        rm -f \$RESTORE_DIR/public/user.ini
+        rm -rf \$RESTORE_DIR/storage
+
+        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/.env        \$RESTORE_DIR/
+        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/.htaccess   \$RESTORE_DIR/public/
+        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/php.ini     \$RESTORE_DIR/public/
+        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/user.ini     \$RESTORE_DIR/public/
+        ln -nfs ~/$PROJECT_DIR/$SHARED_PATH/storage     \$RESTORE_DIR/
+
+        # Activation de la release restaurée
+        rm -f $CURRENT_DIR
+        ln -nfs \$RESTORE_DIR $CURRENT_DIR
+        cd $CURRENT_DIR
+
+        # Optimisations Laravel
+        $php83 artisan optimize:clear
+
+        # Redémarrage du worker queue
+        sudo supervisorctl restart \"laravel-worker-${ENVIRONMENT}:*\" || true
+
+        # Maintenance OFF
+        $php83 artisan up
+
+        echo \"Rollback sur $ENVIRONMENT terminé — release active : \$RESTORE_DIR\"
+      "
+
+# ==============================================================
+# ROLLBACK DEV
+# ==============================================================
+rollback_dev:
+  image: jakzal/phpqa:php8.4
+  stage: rollback
+  variables:
+    PROJECT_DIR: $PROJECT_DIR_DEV
+    ENVIRONMENT: "dev"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+      when: manual
+  environment:
+    name: development
+    url: $ENV_URL_DEV
+  before_script:
+    - *init_ssh
+  script:
+    - *rollback_template
+
+# ==============================================================
+# ROLLBACK TEST
+# ==============================================================
+rollback_test:
+  image: jakzal/phpqa:php8.4
+  stage: rollback
+  variables:
+    PROJECT_DIR: $PROJECT_DIR_TEST
+    ENVIRONMENT: "test"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+      when: manual
+  environment:
+    name: test
+    url: $ENV_URL_TEST
+  before_script:
+    - *init_ssh
+  script:
+    - *rollback_template
+
+# ==============================================================
+# ROLLBACK DEMO
+# ==============================================================
+rollback_demo:
+  image: jakzal/phpqa:php8.4
+  stage: rollback
+  variables:
+    PROJECT_DIR: $PROJECT_DIR_DEMO
+    ENVIRONMENT: "demo"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "staging"'
+      when: manual
+  environment:
+    name: demo
+    url: $ENV_URL_DEMO
+  before_script:
+    - *init_ssh
+  script:
+    - *rollback_template
+
+# ==============================================================
+# ROLLBACK PRE-PROD
+# ==============================================================
+rollback_preprod:
+  image: jakzal/phpqa:php8.4
+  stage: rollback
+  variables:
+    PROJECT_DIR: $PROJECT_DIR_PREPROD
+    ENVIRONMENT: "pre-prod"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+  environment:
+    name: preproduction
+    url: $ENV_URL_PREPROD
+  before_script:
+    - *init_ssh
+  script:
+    - *rollback_template
+
+# ==============================================================
+# ROLLBACK PRODUCTION
+# Disponible sur les tags v* uniquement
+# ==============================================================
+rollback_production:
+  image: jakzal/phpqa:php8.4
+  stage: rollback
+  variables:
+    PROJECT_DIR: $PROJECT_DIR_PROD
+    ENVIRONMENT: "prod"
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+.*$/'
+      when: manual
+  environment:
+    name: production
+    url: $ENV_URL_PROD
+  before_script:
+    - *init_ssh
+  script:
+    - *rollback_template
