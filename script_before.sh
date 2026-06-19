@@ -8,11 +8,11 @@
 #   bash init_server.sh <domaine>
 #
 # Environnements Doxo :
-#   bash init_server.sh dev-doxo.mondomaine.com
-#   bash init_server.sh test-doxo.mondomaine.com
-#   bash init_server.sh demo-doxo.mondomaine.com
-#   bash init_server.sh preprod-doxo.mondomaine.com
-#   bash init_server.sh doxo.mondomaine.com
+#   bash init_server.sh dev.mondomaine.com
+#   bash init_server.sh test.mondomaine.com
+#   bash init_server.sh demo.mondomaine.com
+#   bash init_server.sh preprod.mondomaine.com
+#   bash init_server.sh mondomaine.com
 #
 # À lancer UNE SEULE FOIS par environnement avant le 1er déploiement.
 # ==============================================================
